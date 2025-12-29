@@ -189,16 +189,18 @@ export const MasterDashboard: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-8 py-7 whitespace-nowrap text-right">
-                      <div className="flex justify-end space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex justify-end space-x-3">
                         <button 
                           onClick={() => handleEdit(user)}
                           className="bg-white text-indigo-600 hover:bg-indigo-900 hover:text-white p-4 rounded-2xl transition-all border border-gray-100 shadow-md"
+                          title="Edit User"
                         >
                           <i className="fas fa-edit"></i>
                         </button>
                         <button 
                           onClick={() => toggleStatus(user)}
                           className={`${user.isActive ? 'text-red-600 hover:bg-red-600' : 'text-green-600 hover:bg-green-600'} bg-white hover:text-white p-4 rounded-2xl transition-all border border-gray-100 shadow-md`}
+                          title={user.isActive ? "Deactivate User" : "Activate User"}
                         >
                           <i className={`fas ${user.isActive ? 'fa-ban' : 'fa-check'}`}></i>
                         </button>
