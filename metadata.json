@@ -1,5 +1,7 @@
 {
-  "name": "Copy of PSPMS - Corrugated Factory Management System",
+  "name": "PSPMS - Corrugated Factory Management System",
   "description": "A high-tier corrugated manufacturing management portal with advanced multi-role access control, separated name fields, and a dynamic dashboard teleportation system for master users.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

@@ -130,9 +130,9 @@ export const LoginPage: React.FC = () => {
 
           <div className="bg-gray-50/80 p-6 text-center border-t border-gray-100 flex flex-col items-center">
             <div className="flex space-x-2 mb-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 opacity-50"></span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 opacity-20"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-50"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-20"></span>
             </div>
             <p className="text-gray-400 text-[8px] font-black uppercase tracking-widest leading-relaxed">
               Mainframe Connection Active • 128-bit Encryption<br/>

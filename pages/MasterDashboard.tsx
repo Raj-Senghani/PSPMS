@@ -86,7 +86,7 @@ export const MasterDashboard: React.FC = () => {
                   <p className="text-gray-400 text-[10px] font-black uppercase tracking-wider mb-1">Online Status</p>
                   <p className="text-4xl font-black text-gray-900">{users.filter(u => u.isActive).length}</p>
                 </div>
-                <div className="bg-green-50 p-4 rounded-2xl text-green-600 transition-all">
+                <div className="bg-blue-50 p-4 rounded-2xl text-blue-600 transition-all">
                   <i className="fas fa-signal text-2xl"></i>
                 </div>
               </div>
@@ -97,8 +97,6 @@ export const MasterDashboard: React.FC = () => {
           <div className="lg:col-span-8 space-y-6">
             <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] ml-2">Sub-Terminal Teleport</h4>
             <div className="relative">
-              {/* Using the custom scrollbar by removing .scrollbar-hide if visible scrolling is desired, 
-                  or keeping it clean with the global scrollbar style */}
               <div className="flex overflow-x-auto pb-6 gap-5 snap-x px-1">
                 {allDashboards.map((dash) => (
                   <button

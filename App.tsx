@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginPage } from './pages/LoginPage';
 import { MasterDashboard } from './pages/MasterDashboard';
 import { GenericDashboard } from './pages/GenericDashboard';
+import { SecurityDashboard } from './pages/SecurityDashboard';
 import { DashboardType } from './types';
 import { DASHBOARD_ROUTES } from './constants';
 
@@ -18,14 +19,13 @@ const PrivateRoute: React.FC<{ children: React.ReactNode; allowedDashboard?: str
   // Allow MASTER users to access any dashboard
   const isMaster = authState.user.assignedDashboards.includes(DashboardType.MASTER);
   
-  // If no specific dashboard is requested, just ensure they are logged in (usually root redirect does this)
+  // If no specific dashboard is requested, just ensure they are logged in
   if (!allowedDashboard) return <>{children}</>;
 
   // Check if the requested dashboard is in user's assigned list
   const isAuthorized = authState.user.assignedDashboards.includes(allowedDashboard);
 
   if (!isMaster && !isAuthorized) {
-    // Redirect to their first available dashboard
     const firstDash = authState.user.assignedDashboards[0];
     const targetRoute = DASHBOARD_ROUTES[firstDash as DashboardType] || `/segment/${encodeURIComponent(firstDash)}`;
     return <Navigate to={targetRoute} replace />;
@@ -47,6 +47,13 @@ const RootRedirect = () => {
 const CustomSegmentWrapper = () => {
   const { name } = useParams<{ name: string }>();
   const decodedName = decodeURIComponent(name || '');
+  
+  // If user has a hardcoded route for this, redirect there instead of generic
+  if (Object.values(DashboardType).includes(decodedName as DashboardType)) {
+     const route = DASHBOARD_ROUTES[decodedName as DashboardType];
+     if (route && route !== '/segment/:name') return <Navigate to={route} replace />;
+  }
+
   return (
     <PrivateRoute allowedDashboard={decodedName}>
       <GenericDashboard type={decodedName as any} />
@@ -62,7 +69,6 @@ const App: React.FC = () => {
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           
-          {/* Dashboard Routes */}
           <Route path="/master" element={
             <PrivateRoute allowedDashboard={DashboardType.MASTER}>
               <MasterDashboard />
@@ -101,7 +107,7 @@ const App: React.FC = () => {
 
           <Route path="/security" element={
             <PrivateRoute allowedDashboard={DashboardType.SECURITY}>
-              <GenericDashboard type={DashboardType.SECURITY} />
+              <SecurityDashboard />
             </PrivateRoute>
           } />
           
@@ -111,10 +117,7 @@ const App: React.FC = () => {
             </PrivateRoute>
           } />
 
-          {/* Dynamic Catch-all for Custom Dashboards */}
           <Route path="/segment/:name" element={<CustomSegmentWrapper />} />
-
-          {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

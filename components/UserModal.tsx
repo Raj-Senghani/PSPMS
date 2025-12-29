@@ -34,6 +34,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
     lastName: '',
     username: '',
     password: '',
+    phoneNumber: '',
+    vehicleNumber: '',
     roles: [] as string[],
     assignedDashboards: [] as string[],
     isActive: true
@@ -41,7 +43,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    // Merge existing roles/dashboards from the user into the available lists so they show up
     if (editingUser) {
       setAvailableRoles(prev => Array.from(new Set([...prev, ...editingUser.roles])));
       setAvailableDashboards(prev => Array.from(new Set([...prev, ...editingUser.assignedDashboards])));
@@ -51,6 +52,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
         lastName: editingUser.lastName,
         username: editingUser.username,
         password: editingUser.password || '',
+        phoneNumber: editingUser.phoneNumber || '',
+        vehicleNumber: editingUser.vehicleNumber || '',
         roles: editingUser.roles,
         assignedDashboards: editingUser.assignedDashboards,
         isActive: editingUser.isActive
@@ -61,6 +64,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
         lastName: '',
         username: '',
         password: '',
+        phoneNumber: '',
+        vehicleNumber: '',
         roles: [],
         assignedDashboards: [DashboardType.SALES_TEAM],
         isActive: true
@@ -128,7 +133,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
 
           <form onSubmit={(e) => { e.preventDefault(); onSave(formData); }} className="p-8 space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Identity Details */}
               <div className="space-y-5">
                 <div className="flex items-center space-x-2 text-indigo-900 mb-2">
                   <i className="fas fa-id-card"></i>
@@ -147,6 +151,16 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                 <div>
                   <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Login Username (Terminal ID)</label>
                   <input required className={inputClasses} value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} placeholder="j.doe01" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Phone Number</label>
+                    <input className={inputClasses} value={formData.phoneNumber} onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })} placeholder="+91 00000 00000" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Vehicle Number</label>
+                    <input className={inputClasses} value={formData.vehicleNumber} onChange={e => setFormData({ ...formData, vehicleNumber: e.target.value })} placeholder="ABC-1234" />
+                  </div>
                 </div>
                 <div className="relative">
                   <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Security Password</label>
@@ -176,7 +190,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                 </div>
               </div>
 
-              {/* Roles Selection */}
               <div className="space-y-5">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center space-x-2 text-indigo-900">
@@ -184,8 +197,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                     <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Designated Roles</h4>
                   </div>
                 </div>
-                
-                {/* Create New Role Input */}
                 <div className="flex space-x-2">
                   <input 
                     type="text" 
@@ -202,7 +213,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                     ADD
                   </button>
                 </div>
-
                 <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 max-h-[220px] overflow-y-auto grid grid-cols-1 gap-2">
                   {availableRoles.map(role => (
                     <label key={role} className={`flex items-center space-x-3 p-3 rounded-xl border transition-all cursor-pointer ${
@@ -223,14 +233,12 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
               </div>
             </div>
 
-            {/* Dashboard Checklist */}
             <div className="space-y-5">
                <div className="flex items-center justify-between mb-2">
                  <div className="flex items-center space-x-2 text-indigo-900">
                     <i className="fas fa-layer-group"></i>
                     <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Dashboard Access Matrix</h4>
                  </div>
-                 {/* Create New Dashboard Input */}
                  <div className="flex space-x-2 max-w-xs">
                     <input 
                       type="text" 
@@ -248,7 +256,6 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                     </button>
                   </div>
                </div>
-
                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[200px] overflow-y-auto p-1">
                  {availableDashboards.map(dash => (
                    <label key={dash} className={`flex items-center space-x-3 p-4 rounded-2xl border transition-all cursor-pointer ${

@@ -17,7 +17,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/login', { replace: true });
   };
 
   if (!authState.isAuthenticated || !authState.user) return null;
@@ -25,7 +25,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
   const user = authState.user;
   const isMaster = user.assignedDashboards.includes(DashboardType.MASTER);
 
-  // Get all unique dashboards present in the system for Master, or just the user's list
   const availableDashboards = isMaster 
     ? Array.from(new Set([
         ...Object.values(DashboardType),
@@ -38,6 +37,17 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
   const getTargetRoute = (dash: string) => {
     const route = DASHBOARD_ROUTES[dash as DashboardType];
     return route || `/segment/${encodeURIComponent(dash)}`;
+  };
+
+  const handleBack = () => {
+    // If it's a master user and they are NOT on the master dashboard, take them back to master.
+    // This solves the 'stuck in loop' issue where back takes them to login then redirects.
+    if (isMaster && location.pathname !== '/master') {
+      navigate('/master');
+    } else {
+      // Standard history back
+      navigate(-1);
+    }
   };
 
   return (
@@ -57,11 +67,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
             </div>
 
             <div className="flex items-center space-x-4">
-              {/* Dashboard Quick Switcher */}
               {hasMultipleDashboards && (
                 <div className="hidden lg:flex items-center space-x-2 bg-indigo-800/50 p-1 rounded-xl border border-indigo-700/50">
                   <span className="text-[10px] uppercase font-bold text-indigo-300 px-2">Jump:</span>
-                  <div className="flex space-x-1 max-w-[400px] overflow-x-auto py-0.5">
+                  <div className="flex space-x-1 max-w-[400px] overflow-x-auto py-0.5 no-scrollbar">
                     {availableDashboards.map(dash => {
                       const target = getTargetRoute(dash);
                       const isActive = location.pathname === target;
@@ -104,8 +113,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
           <div className="flex items-center space-x-4">
             <button 
-              onClick={() => navigate(-1)}
+              onClick={handleBack}
               className="p-2 hover:bg-gray-200 rounded-full text-gray-400 transition-colors"
+              title="Go Back"
             >
               <i className="fas fa-arrow-left"></i>
             </button>
@@ -118,8 +128,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
           </div>
           <div className="mt-4 md:mt-0 bg-white px-4 py-2 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-3">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
             </span>
             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Active Terminal: {user.username}</span>
           </div>
