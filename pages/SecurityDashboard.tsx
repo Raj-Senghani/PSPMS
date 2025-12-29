@@ -31,9 +31,16 @@ export const SecurityDashboard: React.FC = () => {
   const [selectedEntry, setSelectedEntry] = useState<SecurityEntry | null>(null);
   const [fullSizePhotoUrl, setFullSizePhotoUrl] = useState<string | null>(null);
   
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  // Camera Control States
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [isFlashOn, setIsFlashOn] = useState(false);
+  const [hasFlash, setHasFlash] = useState(false);
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
@@ -55,49 +62,121 @@ export const SecurityDashboard: React.FC = () => {
     localStorage.setItem('pspms_security_data', JSON.stringify(entries));
   }, [entries]);
 
+  // Check for multiple cameras on mount or when modal opens
   useEffect(() => {
-    if (!isEntryModalOpen) {
+    const checkCameras = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        setHasMultipleCameras(videoDevices.length > 1);
+      } catch (err) {
+        console.error("Error enumerating devices", err);
+      }
+    };
+    checkCameras();
+  }, [isCameraModalOpen]);
+
+  // Handle camera modal cleanup
+  useEffect(() => {
+    if (!isCameraModalOpen) {
       stopCamera();
     }
-  }, [isEntryModalOpen]);
+  }, [isCameraModalOpen]);
 
-  const startCamera = async () => {
+  const startCamera = async (mode: 'user' | 'environment') => {
+    stopCamera(); 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "environment" }, 
+      const constraints: MediaStreamConstraints = { 
+        video: { 
+          facingMode: { ideal: mode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }, 
         audio: false 
-      });
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        setIsCameraActive(true);
+        
+        // Wait for track to be active to check capabilities
+        const track = stream.getVideoTracks()[0];
+        // Short delay to ensure browser has processed track capabilities
+        setTimeout(() => {
+          const capabilities = track.getCapabilities() as any;
+          setHasFlash(!!capabilities && 'torch' in capabilities);
+          setIsFlashOn(false); 
+        }, 500);
       }
     } catch (err) {
-      console.error("Camera access denied:", err);
-      alert("Could not access camera. Please check permissions.");
+      console.error("Camera access failed:", err);
+      // Fallback for some browsers/devices that might not like specific constraints
+      if (mode === 'environment') {
+        console.log("Retrying with front camera fallback...");
+        startCamera('user');
+      } else {
+        alert("System could not initialize camera. Please verify permissions.");
+        setIsCameraModalOpen(false);
+      }
     }
   };
 
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setIsCameraActive(false);
+    setHasFlash(false);
+    setIsFlashOn(false);
+  };
+
+  const toggleFacingMode = () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    startCamera(nextMode);
+  };
+
+  const toggleFlash = async () => {
+    if (!streamRef.current || !hasFlash) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    try {
+      const nextFlashState = !isFlashOn;
+      // applyConstraints is the standard way to toggle torch
+      await track.applyConstraints({
+        advanced: [{ torch: nextFlashState }]
+      } as any);
+      setIsFlashOn(nextFlashState);
+    } catch (err) {
+      console.error("Flash control failed:", err);
+    }
   };
 
   const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    if (video && canvas && video.readyState >= 2) {
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext('2d');
+      
       if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        // Handle mirroring for front camera
+        if (facingMode === 'user') {
+          ctx.translate(width, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
         setFormData(prev => ({ ...prev, photoUrl: dataUrl }));
-        stopCamera();
+        setIsCameraModalOpen(false);
       }
     }
   };
@@ -177,7 +256,6 @@ export const SecurityDashboard: React.FC = () => {
       expectedOutTime: '',
       photoUrl: ''
     });
-    setIsCameraActive(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -212,7 +290,7 @@ export const SecurityDashboard: React.FC = () => {
   return (
     <Layout title="Security Command">
       <div className="space-y-6 md:space-y-10 animate-fade-in w-full max-w-full overflow-x-hidden">
-        {/* Responsive Header Stats */}
+        {/* Header Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
           <div className="bg-indigo-900 p-4 md:p-8 rounded-2xl md:rounded-[32px] text-white shadow-xl shadow-indigo-200/50">
             <p className="text-indigo-300 text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1">Personnel IN</p>
@@ -278,7 +356,7 @@ export const SecurityDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Entry Log Table */}
         <div className="bg-white rounded-2xl md:rounded-[40px] border border-gray-100 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto w-full">
             <table className="w-full text-left border-collapse min-w-[800px]">
@@ -344,7 +422,7 @@ export const SecurityDashboard: React.FC = () => {
                         <p className="text-emerald-600"><span className="text-gray-400 mr-2">IN:</span> {new Date(entry.inTime).toLocaleTimeString()}</p>
                         <p className="text-red-400">
                           <span className="text-gray-400 mr-2">OUT:</span> 
-                          {entry.outTime ? new Date(entry.outTime).toLocaleTimeString() : 'PENDING'}
+                          {entry.outTime ? new Date(entry.outTime).toLocaleTimeString() : 'PENDING EXIT'}
                         </p>
                       </div>
                     </td>
@@ -441,40 +519,62 @@ export const SecurityDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Photo Section */}
-              <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl md:rounded-3xl p-6 md:p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[200px]">
-                {formData.photoUrl && !isCameraActive ? (
+              {/* Enhanced Photo Section */}
+              <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl md:rounded-3xl p-6 md:p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[240px]">
+                {formData.photoUrl ? (
                   <div className="relative w-full h-40 md:h-48 group">
                     <img src={formData.photoUrl} alt="Preview" className="w-full h-full object-cover rounded-xl shadow-lg" />
-                    <button 
-                      type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, photoUrl: '' }))}
-                      className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full shadow-lg transition-opacity"
-                    >
-                      <i className="fas fa-trash"></i>
-                    </button>
-                  </div>
-                ) : isCameraActive ? (
-                  <div className="relative w-full aspect-video md:aspect-auto md:h-64 flex flex-col items-center">
-                    <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl bg-black" />
-                    <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-4">
-                      <button type="button" onClick={capturePhoto} className="bg-indigo-600 text-white px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-black transition-colors">Capture Snapshot</button>
-                      <button type="button" onClick={stopCamera} className="bg-white text-gray-600 px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-gray-100 transition-colors">Cancel</button>
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-4">
+                       <button 
+                        type="button"
+                        onClick={() => {
+                          setIsCameraModalOpen(true);
+                          startCamera(facingMode);
+                        }}
+                        className="bg-white p-3 rounded-full text-indigo-600 hover:scale-110 transition-transform"
+                      >
+                        <i className="fas fa-redo"></i>
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, photoUrl: '' }))}
+                        className="bg-red-600 p-3 rounded-full text-white hover:scale-110 transition-transform"
+                      >
+                        <i className="fas fa-trash"></i>
+                      </button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center space-y-4">
                     <div className="flex space-x-6">
-                      <button type="button" onClick={startCamera} className="flex flex-col items-center group">
-                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all"><i className="fas fa-camera text-xl"></i></div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setIsCameraModalOpen(true);
+                          startCamera(facingMode);
+                        }}
+                        className="flex flex-col items-center group"
+                      >
+                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                          <i className="fas fa-camera text-xl"></i>
+                        </div>
                         <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Capture</span>
                       </button>
                       <div className="relative flex flex-col items-center group">
-                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all"><i className="fas fa-upload text-xl"></i></div>
+                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                          <i className="fas fa-upload text-xl"></i>
+                        </div>
                         <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Upload</span>
-                        <input type="file" accept="image/*" ref={fileInputRef} onChange={handlePhotoUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          ref={fileInputRef} 
+                          onChange={handlePhotoUpload} 
+                          className="absolute inset-0 opacity-0 cursor-pointer" 
+                        />
                       </div>
                     </div>
+                    <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest text-center">Identity Documentation Required</p>
                   </div>
                 )}
                 <canvas ref={canvasRef} className="hidden" />
@@ -569,6 +669,96 @@ export const SecurityDashboard: React.FC = () => {
                 <button type="submit" className="bg-indigo-900 hover:bg-black text-white px-8 md:px-12 py-3 md:py-5 rounded-xl md:rounded-[24px] font-black text-[10px] uppercase tracking-widest shadow-2xl shadow-indigo-200 transition-all transform hover:-translate-y-1">Establish Log</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Popup Camera Capture Modal - Optimized for Desktop/Tablet Visibility */}
+      {isCameraModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl animate-fade-in overflow-hidden">
+          <div className="relative w-full max-w-4xl bg-slate-900 rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.8)] border border-white/10 flex flex-col h-full max-h-[90vh] md:max-h-[85vh]">
+            
+            {/* Camera Overlay Controls (Top) */}
+            <div className="absolute top-0 left-0 right-0 p-4 md:p-8 flex justify-between items-center z-20 bg-gradient-to-b from-black/80 to-transparent">
+              <button 
+                onClick={() => setIsCameraModalOpen(false)}
+                className="w-10 h-10 md:w-14 md:h-14 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-600 transition-all border border-white/10 group"
+              >
+                <i className="fas fa-times text-sm md:text-lg group-hover:scale-110 transition-transform"></i>
+              </button>
+              
+              <div className="flex space-x-3 md:space-x-4">
+                {hasFlash && (
+                  <button 
+                    onClick={toggleFlash}
+                    className={`w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all border border-white/10 ${
+                      isFlashOn ? 'bg-yellow-400 text-black shadow-[0_0_30px_rgba(250,204,21,0.6)]' : 'bg-black/50 text-white hover:bg-white/20'
+                    }`}
+                    title="Toggle Flash"
+                  >
+                    <i className={`fas ${isFlashOn ? 'fa-bolt' : 'fa-bolt-slash'} text-sm md:text-lg`}></i>
+                  </button>
+                )}
+                {hasMultipleCameras && (
+                  <button 
+                    onClick={toggleFacingMode}
+                    className="w-10 h-10 md:w-14 md:h-14 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-indigo-600 transition-all border border-white/10 group"
+                    title="Flip Camera"
+                  >
+                    <i className="fas fa-camera-rotate text-sm md:text-lg group-hover:rotate-180 transition-transform duration-500"></i>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Video Feed Container */}
+            <div className="flex-grow relative bg-black flex items-center justify-center overflow-hidden min-h-0">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                muted
+                onLoadedMetadata={() => videoRef.current?.play()}
+                className={`w-full h-full object-contain md:object-cover transition-transform duration-500 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+              />
+              
+              {/* Corner Accents - Responsive Sizing */}
+              <div className="absolute inset-4 md:inset-10 pointer-events-none">
+                <div className="absolute top-0 left-0 w-8 h-8 md:w-14 md:h-14 border-t-4 border-l-4 border-white/30 rounded-tl-2xl"></div>
+                <div className="absolute top-0 right-0 w-8 h-8 md:w-14 md:h-14 border-t-4 border-r-4 border-white/30 rounded-tr-2xl"></div>
+                <div className="absolute bottom-0 left-0 w-8 h-8 md:w-14 md:h-14 border-b-4 border-l-4 border-white/30 rounded-bl-2xl"></div>
+                <div className="absolute bottom-0 right-0 w-8 h-8 md:w-14 md:h-14 border-b-4 border-r-4 border-white/30 rounded-br-2xl"></div>
+              </div>
+
+              {/* Center Focus Reticle */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 md:w-80 md:h-80 border-2 border-white/10 rounded-[40px] flex items-center justify-center">
+                  <div className="w-1 h-1 bg-white/20 rounded-full"></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Capture Section - High Visibility for All Screens */}
+            <div className="bg-slate-900 px-6 py-8 md:py-12 flex flex-col items-center border-t border-white/5 shrink-0 z-20">
+              <div className="flex flex-col items-center space-y-4">
+                <button 
+                  onClick={capturePhoto}
+                  className="group relative w-16 h-16 md:w-24 md:h-24 flex items-center justify-center transition-transform active:scale-90"
+                >
+                  <div className="absolute inset-0 rounded-full border-4 border-white/20 group-hover:border-indigo-500/60 group-hover:scale-110 transition-all duration-300"></div>
+                  <div className="w-12 h-12 md:w-20 md:h-20 rounded-full bg-white group-hover:scale-105 transition-all shadow-[0_0_40px_rgba(255,255,255,0.4)] relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-gray-200 to-white opacity-50"></div>
+                  </div>
+                  {/* Subtle Radar Ripple */}
+                  <div className="absolute inset-0 rounded-full bg-white/10 animate-ping opacity-20 pointer-events-none"></div>
+                </button>
+                <div className="flex flex-col items-center space-y-1">
+                  <p className="text-[10px] md:text-xs font-black text-white uppercase tracking-[0.3em] opacity-80">Capture Identity</p>
+                  <p className="text-[8px] md:text-[9px] font-bold text-indigo-400 uppercase tracking-widest opacity-60">Verification Protocol Active</p>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
