@@ -97,7 +97,9 @@ export const MasterDashboard: React.FC = () => {
           <div className="lg:col-span-8 space-y-6">
             <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] ml-2">Sub-Terminal Teleport</h4>
             <div className="relative">
-              <div className="flex overflow-x-auto pb-6 gap-5 scrollbar-hide snap-x px-1">
+              {/* Using the custom scrollbar by removing .scrollbar-hide if visible scrolling is desired, 
+                  or keeping it clean with the global scrollbar style */}
+              <div className="flex overflow-x-auto pb-6 gap-5 snap-x px-1">
                 {allDashboards.map((dash) => (
                   <button
                     key={dash}
@@ -220,11 +222,6 @@ export const MasterDashboard: React.FC = () => {
         onSave={handleSaveUser}
         editingUser={editingUser}
       />
-
-      <style>{`
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </Layout>
   );
 };

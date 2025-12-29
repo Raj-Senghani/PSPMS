@@ -61,7 +61,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
               {hasMultipleDashboards && (
                 <div className="hidden lg:flex items-center space-x-2 bg-indigo-800/50 p-1 rounded-xl border border-indigo-700/50">
                   <span className="text-[10px] uppercase font-bold text-indigo-300 px-2">Jump:</span>
-                  <div className="flex space-x-1 max-w-[400px] overflow-x-auto no-scrollbar py-0.5">
+                  <div className="flex space-x-1 max-w-[400px] overflow-x-auto py-0.5">
                     {availableDashboards.map(dash => {
                       const target = getTargetRoute(dash);
                       const isActive = location.pathname === target;
@@ -137,10 +137,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
           </p>
         </div>
       </footer>
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </div>
   );
 };
