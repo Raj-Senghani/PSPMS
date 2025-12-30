@@ -11,87 +11,145 @@ import {
 
 const OVERSTAY_THRESHOLD_HOURS = 8;
 
+const COUNTRY_CODES = [
+  { code: '+91', country: 'India' },
+  { code: '+1', country: 'USA/Canada' },
+  { code: '+44', country: 'UK' },
+  { code: '+971', country: 'UAE' },
+  { code: '+61', country: 'Australia' },
+  { code: '+86', country: 'China' },
+  { code: '+49', country: 'Germany' },
+  { code: '+33', country: 'France' },
+  { code: '+81', country: 'Japan' },
+];
+
 const formatForInput = (date: Date) => {
   const tzOffset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
 };
 
-export const SecurityDashboard: React.FC = () => {
-  const { authState, users, updateUser } = useAuth();
-  const [entries, setEntries] = useState<SecurityEntry[]>(() => {
-    const saved = localStorage.getItem('pspms_security_data');
-    return saved ? JSON.parse(saved) : [];
-  });
+const getFutureTime = (hours: number) => {
+  const date = new Date();
+  date.setHours(date.getHours() + hours);
+  const tzOffset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
+};
 
-  const [filterCategory, setFilterCategory] = useState<string>('All');
-  const [filterSubType, setFilterSubType] = useState<string>('All');
+export const SecurityDashboard: React.FC = () => {
+  const { authState, users } = useAuth();
+  const [entries, setEntries] = useState<SecurityEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterCategory, setFilterCategory] = useState<SecurityCategory | 'All'>('All');
+  const [filterSubType, setFilterSubType] = useState<SecuritySubType | 'All'>('All');
   const [activeTab, setActiveTab] = useState<'today' | 'active' | 'pending'>('today');
 
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
-  const [selectedEntry, setSelectedEntry] = useState<SecurityEntry | null>(null);
-  const [fullSizePhotoUrl, setFullSizePhotoUrl] = useState<string | null>(null);
-  
-  // Camera Control States
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [hasFlash, setHasFlash] = useState(false);
-  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [countryCode, setCountryCode] = useState('+91');
   const [formData, setFormData] = useState({
     category: SecurityCategory.PERSON,
     subType: SecuritySubType.VISITOR,
     name: '',
     staffId: '',
-    phoneNumber: '',
+    phoneNumber: '', // This will hold the 10 digits
     vehiclePresence: false,
     vehicleNumber: '',
     reason: '',
     remarks: '',
     inTime: formatForInput(new Date()),
-    expectedOutTime: '',
+    expectedOutTime: getFutureTime(1),
     photoUrl: ''
   });
 
   useEffect(() => {
-    localStorage.setItem('pspms_security_data', JSON.stringify(entries));
-  }, [entries]);
+    const saved = localStorage.getItem('pspms_security_logs');
+    if (saved) setEntries(JSON.parse(saved));
+    setTimeout(() => setIsLoading(false), 300);
+  }, []);
 
-  // Check for multiple cameras on mount or when modal opens
+  // Camera management effect
   useEffect(() => {
-    const checkCameras = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setHasMultipleCameras(videoDevices.length > 1);
-      } catch (err) {
-        console.error("Error enumerating devices", err);
-      }
-    };
-    checkCameras();
-  }, [isCameraModalOpen]);
-
-  // Handle camera modal cleanup
-  useEffect(() => {
-    if (!isCameraModalOpen) {
+    if (isCameraModalOpen) {
+      startCamera(facingMode);
+    } else {
       stopCamera();
     }
-  }, [isCameraModalOpen]);
+    return () => stopCamera();
+  }, [isCameraModalOpen, facingMode]);
+
+  // Professional Staff Auto-fill Logic
+  useEffect(() => {
+    if (formData.subType === SecuritySubType.STAFF && formData.name.length > 2) {
+      const searchName = formData.name.toLowerCase();
+      const matchedUser = users.find(u => 
+        `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchName)
+      );
+
+      if (matchedUser) {
+        // Strip country code if present for display in our 10-digit box
+        let strippedPhone = matchedUser.phoneNumber || '';
+        const foundCode = COUNTRY_CODES.find(c => strippedPhone.startsWith(c.code));
+        if (foundCode) {
+          setCountryCode(foundCode.code);
+          strippedPhone = strippedPhone.replace(foundCode.code, '').trim();
+        }
+
+        setFormData(prev => ({
+          ...prev,
+          phoneNumber: strippedPhone.slice(0, 10),
+          vehicleNumber: matchedUser.vehicleNumber || prev.vehicleNumber,
+          vehiclePresence: !!matchedUser.vehicleNumber || prev.vehiclePresence
+        }));
+        return;
+      }
+
+      const historicalMatch = entries.find(e => 
+        e.name.toLowerCase().includes(searchName) && 
+        e.subType === SecuritySubType.STAFF
+      );
+
+      if (historicalMatch) {
+        let strippedPhone = historicalMatch.phoneNumber || '';
+        const foundCode = COUNTRY_CODES.find(c => strippedPhone.startsWith(c.code));
+        if (foundCode) {
+          setCountryCode(foundCode.code);
+          strippedPhone = strippedPhone.replace(foundCode.code, '').trim();
+        }
+
+        setFormData(prev => ({
+          ...prev,
+          phoneNumber: strippedPhone.slice(0, 10),
+          vehicleNumber: historicalMatch.vehicleNumber || prev.vehicleNumber,
+          vehiclePresence: historicalMatch.vehiclePresence || prev.vehiclePresence
+        }));
+      }
+    }
+  }, [formData.name, formData.subType, users, entries]);
+
+  const syncLogs = (updatedEntries: SecurityEntry[]) => {
+    setEntries(updatedEntries);
+    localStorage.setItem('pspms_security_logs', JSON.stringify(updatedEntries));
+  };
 
   const startCamera = async (mode: 'user' | 'environment') => {
-    stopCamera(); 
+    setIsCameraReady(false);
     try {
       const constraints: MediaStreamConstraints = { 
-        video: { 
-          facingMode: { ideal: mode },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }, 
+        video: { facingMode: { ideal: mode } }, 
         audio: false 
       };
       
@@ -100,26 +158,17 @@ export const SecurityDashboard: React.FC = () => {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        
-        // Wait for track to be active to check capabilities
+        try {
+          await videoRef.current.play();
+        } catch (e) {
+          console.error("Camera play failed", e);
+        }
         const track = stream.getVideoTracks()[0];
-        // Short delay to ensure browser has processed track capabilities
-        setTimeout(() => {
-          const capabilities = track.getCapabilities() as any;
-          setHasFlash(!!capabilities && 'torch' in capabilities);
-          setIsFlashOn(false); 
-        }, 500);
+        const capabilities = track.getCapabilities() as any;
+        setHasFlash(!!capabilities.torch);
       }
     } catch (err) {
-      console.error("Camera access failed:", err);
-      // Fallback for some browsers/devices that might not like specific constraints
-      if (mode === 'environment') {
-        console.log("Retrying with front camera fallback...");
-        startCamera('user');
-      } else {
-        alert("System could not initialize camera. Please verify permissions.");
-        setIsCameraModalOpen(false);
-      }
+      console.error("Camera access failed", err);
     }
   };
 
@@ -128,56 +177,50 @@ export const SecurityDashboard: React.FC = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setHasFlash(false);
     setIsFlashOn(false);
-  };
-
-  const toggleFacingMode = () => {
-    const nextMode = facingMode === 'user' ? 'environment' : 'user';
-    setFacingMode(nextMode);
-    startCamera(nextMode);
+    setIsCameraReady(false);
   };
 
   const toggleFlash = async () => {
-    if (!streamRef.current || !hasFlash) return;
+    if (!streamRef.current) return;
     const track = streamRef.current.getVideoTracks()[0];
     try {
-      const nextFlashState = !isFlashOn;
-      // applyConstraints is the standard way to toggle torch
-      await track.applyConstraints({
-        advanced: [{ torch: nextFlashState }]
-      } as any);
-      setIsFlashOn(nextFlashState);
+      await track.applyConstraints({ advanced: [{ torch: !isFlashOn }] } as any);
+      setIsFlashOn(!isFlashOn);
     } catch (err) {
-      console.error("Flash control failed:", err);
+      console.error("Flash toggle failed", err);
     }
   };
 
   const capturePhoto = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    
-    if (video && canvas && video.readyState >= 2) {
-      const width = video.videoWidth;
-      const height = video.videoHeight;
+    if (video && canvas) {
+      const width = video.videoWidth || 640;
+      const height = video.videoHeight || 480;
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
-      
       if (ctx) {
-        // Handle mirroring for front camera
         if (facingMode === 'user') {
-          ctx.translate(width, 0);
+          ctx.translate(canvas.width, 0);
           ctx.scale(-1, 1);
         }
         ctx.drawImage(video, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         setFormData(prev => ({ ...prev, photoUrl: dataUrl }));
         setIsCameraModalOpen(false);
+        stopCamera();
       }
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setFormData(prev => ({ ...prev, photoUrl: reader.result as string }));
+      reader.readAsDataURL(file);
     }
   };
 
@@ -187,61 +230,70 @@ export const SecurityDashboard: React.FC = () => {
       if (entry.status === SecurityStatus.IN) {
         const inTime = new Date(entry.inTime);
         const diffHours = (now.getTime() - inTime.getTime()) / (1000 * 60 * 60);
-        if (diffHours >= OVERSTAY_THRESHOLD_HOURS) {
-          return { ...entry, status: SecurityStatus.OVERSTAY };
-        }
+        if (diffHours >= OVERSTAY_THRESHOLD_HOURS) return { ...entry, status: SecurityStatus.OVERSTAY };
       }
       return entry;
     });
   }, [entries]);
 
   const filteredEntries = computedEntries.filter(entry => {
-    const isToday = new Date(entry.inTime).toDateString() === new Date().toDateString();
+    const entryDate = new Date(entry.inTime).toDateString();
+    const today = new Date().toDateString();
     
-    if (activeTab === 'today' && !isToday) return false;
+    if (activeTab === 'today' && entryDate !== today) return false;
     if (activeTab === 'active' && entry.status === SecurityStatus.OUT) return false;
-    if (activeTab === 'pending' && entry.status !== SecurityStatus.IN && entry.status !== SecurityStatus.OVERSTAY) return false;
-
+    if (activeTab === 'pending' && entry.status === SecurityStatus.OUT) return false;
     if (filterCategory !== 'All' && entry.category !== filterCategory) return false;
     if (filterSubType !== 'All' && entry.subType !== filterSubType) return false;
-
+    if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+            entry.name.toLowerCase().includes(query) ||
+            (entry.vehicleNumber && entry.vehicleNumber.toLowerCase().includes(query))
+        );
+    }
     return true;
   });
 
-  const handleCreateEntry = (e: React.FormEvent) => {
+  const handleCreateEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.subType === SecuritySubType.STAFF && formData.staffId) {
-      updateUser(formData.staffId, {
-        vehicleNumber: formData.vehiclePresence ? formData.vehicleNumber : ''
-      });
+    if (formData.phoneNumber.length !== 10) {
+      alert("Please enter a valid 10-digit phone number.");
+      return;
     }
 
+    setIsLoading(true);
     const newEntry: SecurityEntry = {
       id: Math.random().toString(36).substr(2, 9),
       ...formData,
+      phoneNumber: `${countryCode} ${formData.phoneNumber}`,
       inTime: new Date(formData.inTime).toISOString(),
-      expectedOutTime: formData.expectedOutTime ? new Date(formData.expectedOutTime).toISOString() : undefined,
       status: SecurityStatus.IN,
       createdBy: authState.user?.id || 'sys',
       createdByName: `${authState.user?.firstName} ${authState.user?.lastName}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    setEntries([newEntry, ...entries]);
-    setIsEntryModalOpen(false);
-    resetForm();
+    setTimeout(() => {
+      syncLogs([newEntry, ...entries]);
+      setIsLoading(false);
+      setIsEntryModalOpen(false);
+      resetForm();
+    }, 400);
   };
 
   const handleMarkExit = (id: string) => {
-    setEntries(entries.map(e => 
-      e.id === id ? { ...e, outTime: new Date().toISOString(), status: SecurityStatus.OUT, updatedAt: new Date().toISOString() } : e
-    ));
-    if (selectedEntry?.id === id) {
-      setSelectedEntry(null);
-    }
+    const updated = entries.map(e => e.id === id ? { 
+      ...e, 
+      status: SecurityStatus.OUT, 
+      outTime: new Date().toISOString(),
+      updatedAt: new Date().toISOString() 
+    } : e);
+    syncLogs(updated);
   };
 
   const resetForm = () => {
+    setCountryCode('+91');
     setFormData({
       category: SecurityCategory.PERSON,
       subType: SecuritySubType.VISITOR,
@@ -253,589 +305,341 @@ export const SecurityDashboard: React.FC = () => {
       reason: '',
       remarks: '',
       inTime: formatForInput(new Date()),
-      expectedOutTime: '',
+      expectedOutTime: getFutureTime(1),
       photoUrl: ''
     });
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleStaffSelect = (staffId: string) => {
-    const selectedStaff = users.find(u => u.id === staffId);
-    if (selectedStaff) {
-      setFormData({
-        ...formData,
-        staffId,
-        name: `${selectedStaff.firstName} ${selectedStaff.lastName}`,
-        phoneNumber: selectedStaff.phoneNumber || '',
-        vehicleNumber: selectedStaff.vehicleNumber || '',
-        vehiclePresence: !!selectedStaff.vehicleNumber,
-        reason: 'Staff Duty'
-      });
-    }
-  };
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, photoUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const inputClasses = "w-full px-4 py-3 rounded-2xl border border-gray-100 bg-gray-50 text-gray-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all outline-none font-bold placeholder-gray-300 text-sm";
+  const labelClasses = "text-xs font-semibold text-gray-600 mb-1 block";
+  const inputClasses = "w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm bg-white text-gray-900 shadow-sm";
 
   return (
-    <Layout title="Security Command">
-      <div className="space-y-6 md:space-y-10 animate-fade-in w-full max-w-full overflow-x-hidden">
-        {/* Header Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-          <div className="bg-indigo-900 p-4 md:p-8 rounded-2xl md:rounded-[32px] text-white shadow-xl shadow-indigo-200/50">
-            <p className="text-indigo-300 text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1">Personnel IN</p>
-            <p className="text-2xl md:text-4xl font-black truncate">{computedEntries.filter(e => e.status !== SecurityStatus.OUT && e.category === SecurityCategory.PERSON).length}</p>
-          </div>
-          <div className="bg-white border border-gray-100 p-4 md:p-8 rounded-2xl md:rounded-[32px] shadow-sm">
-            <p className="text-gray-400 text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1">Material Transit</p>
-            <p className="text-2xl md:text-4xl font-black text-gray-900 truncate">{computedEntries.filter(e => e.status !== SecurityStatus.OUT && e.category === SecurityCategory.MATERIAL).length}</p>
-          </div>
-          <div className="bg-white border border-gray-100 p-4 md:p-8 rounded-2xl md:rounded-[32px] shadow-sm">
-            <p className="text-gray-400 text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1">Total Logs Today</p>
-            <p className="text-2xl md:text-4xl font-black text-gray-900 truncate">{computedEntries.filter(e => new Date(e.inTime).toDateString() === new Date().toDateString()).length}</p>
-          </div>
-          <div className="bg-red-50 border border-red-100 p-4 md:p-8 rounded-2xl md:rounded-[32px] shadow-sm">
-            <p className="text-red-400 text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1">Overstay Alerts</p>
-            <p className="text-2xl md:text-4xl font-black text-red-600 truncate">{computedEntries.filter(e => e.status === SecurityStatus.OVERSTAY).length}</p>
-          </div>
+    <Layout title="Security Management">
+      <div className="space-y-6">
+        {/* Simple Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Personnel IN', val: computedEntries.filter(e => e.status !== SecurityStatus.OUT && e.category === SecurityCategory.PERSON).length, color: 'text-indigo-600' },
+            { label: 'Vehicles IN', val: computedEntries.filter(e => e.status !== SecurityStatus.OUT && e.vehiclePresence).length, color: 'text-blue-600' },
+            { label: 'Total Logs', val: computedEntries.length, color: 'text-gray-600' },
+            { label: 'Overstay Warnings', val: computedEntries.filter(e => e.status === SecurityStatus.OVERSTAY).length, color: 'text-red-600' }
+          ].map((stat, idx) => (
+            <div key={idx} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{stat.label}</p>
+              <p className={`text-2xl font-bold mt-1 ${stat.color}`}>{stat.val}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Action Bar */}
-        <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center bg-white p-4 md:p-6 rounded-2xl md:rounded-[32px] border border-gray-100 gap-4 md:gap-6">
-          <div className="flex space-x-1 md:space-x-2 overflow-x-auto no-scrollbar py-1">
-            {(['today', 'active', 'pending'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-shrink-0 px-4 md:px-6 py-2 md:py-3 rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all ${
-                  activeTab === tab ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
-                }`}
+        {/* Filter Bar */}
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex bg-gray-100 p-1 rounded-lg">
+              {(['today', 'active', 'pending'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-semibold capitalize transition-all ${
+                    activeTab === tab ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+              <div className="relative flex-grow">
+                <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                <input 
+                  type="text" 
+                  placeholder="Search name or vehicle..." 
+                  className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <button 
+                onClick={() => { resetForm(); setIsEntryModalOpen(true); }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all whitespace-nowrap"
               >
-                {tab === 'today' ? "Today" : tab === 'active' ? 'Active' : 'Pending'}
+                <i className="fas fa-plus"></i> New Entry
               </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 xl:flex flex-wrap gap-3 md:gap-4 items-center">
-            <select 
-              className="bg-gray-50 border-none rounded-xl md:rounded-2xl px-3 md:px-4 py-3 text-[9px] md:text-[10px] font-black uppercase tracking-wider text-gray-500 outline-none focus:ring-2 focus:ring-indigo-500 w-full xl:w-auto"
-              value={filterCategory}
-              onChange={e => setFilterCategory(e.target.value)}
-            >
-              <option value="All">All Categories</option>
-              {Object.values(SecurityCategory).map(cat => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
-            <select 
-              className="bg-gray-50 border-none rounded-xl md:rounded-2xl px-3 md:px-4 py-3 text-[9px] md:text-[10px] font-black uppercase tracking-wider text-gray-500 outline-none focus:ring-2 focus:ring-indigo-500 w-full xl:w-auto"
-              value={filterSubType}
-              onChange={e => setFilterSubType(e.target.value)}
-            >
-              <option value="All">All Types</option>
-              {Object.values(SecuritySubType).map(type => <option key={type} value={type}>{type}</option>)}
-            </select>
-            <button 
-              onClick={() => {
-                resetForm();
-                setIsEntryModalOpen(true);
-              }}
-              className="bg-indigo-900 hover:bg-black text-white px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2 md:space-x-3 transition-all w-full xl:w-auto"
-            >
-              <i className="fas fa-plus"></i>
-              <span>New Entry</span>
-            </button>
-          </div>
+            </div>
         </div>
 
-        {/* Entry Log Table */}
-        <div className="bg-white rounded-2xl md:rounded-[40px] border border-gray-100 shadow-2xl overflow-hidden">
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse min-w-[800px]">
-              <thead>
-                <tr className="bg-gray-50/50">
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Profile</th>
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Segment</th>
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Vehicle</th>
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Timeline</th>
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                  <th className="px-4 md:px-8 py-4 md:py-6 text-right text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">Action</th>
+        {/* Table View */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider">Identity</th>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider">Type</th>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider">Vehicle</th>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider">Timing</th>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider">Status</th>
+                  <th className="px-6 py-4 font-semibold uppercase text-[10px] tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="divide-y divide-gray-100">
                 {filteredEntries.map(entry => (
-                  <tr 
-                    key={entry.id} 
-                    onClick={() => setSelectedEntry(entry)}
-                    className={`cursor-pointer hover:bg-indigo-50/20 transition-all ${entry.status === SecurityStatus.OVERSTAY ? 'bg-red-50/30' : ''}`}
-                  >
-                    <td className="px-4 md:px-8 py-4 md:py-6">
-                      <div className="flex items-center space-x-3 md:space-x-4">
-                        <div className="flex-shrink-0">
+                  <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center border border-gray-200 overflow-hidden cursor-zoom-in"
+                          onClick={() => entry.photoUrl && setPreviewImageUrl(entry.photoUrl)}
+                        >
                           {entry.photoUrl ? (
-                            <img 
-                              src={entry.photoUrl} 
-                              alt="" 
-                              className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl object-cover shadow-sm hover:scale-105 transition-transform" 
-                              onClick={(e) => { e.stopPropagation(); setFullSizePhotoUrl(entry.photoUrl!); }}
-                            />
+                            <img src={entry.photoUrl} className="w-full h-full object-cover" alt="" />
                           ) : (
-                            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center text-base md:text-lg font-black ${
-                              entry.category === SecurityCategory.PERSON ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'
-                            }`}>
-                              <i className={`fas ${entry.category === SecurityCategory.PERSON ? 'fa-user' : 'fa-box-open'}`}></i>
-                            </div>
+                            <i className="fas fa-user text-gray-300"></i>
                           )}
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-xs md:text-sm font-black text-gray-900 leading-none mb-1 truncate">{entry.name}</p>
-                          <p className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-tight truncate max-w-[120px]" title={entry.reason}>
-                            {entry.reason || '--'}
-                          </p>
+                        <div>
+                          <p className="font-semibold text-gray-900">{entry.name}</p>
+                          <p className="text-[10px] text-gray-500">{entry.phoneNumber || 'No Contact'}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 md:px-8 py-4 md:py-6">
-                      <span className="px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-tight bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap">
-                        {entry.subType}
+                    <td className="px-6 py-4">
+                      <span className="text-xs text-gray-600">{entry.subType}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {entry.vehiclePresence ? <span className="font-mono text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded">{entry.vehicleNumber}</span> : '--'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-[11px] leading-tight">
+                        <p className="text-green-600">IN: {new Date(entry.inTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</p>
+                        {entry.outTime && <p className="text-red-500">OUT: {new Date(entry.outTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</p>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full border ${
+                        entry.status === SecurityStatus.OUT 
+                          ? 'bg-gray-50 text-gray-400 border-gray-200' 
+                          : entry.status === SecurityStatus.OVERSTAY 
+                          ? 'bg-red-50 text-red-600 border-red-200'
+                          : 'bg-green-50 text-green-700 border-green-200'
+                      }`}>
+                        {entry.status}
                       </span>
                     </td>
-                    <td className="px-4 md:px-8 py-4 md:py-6">
-                      {entry.vehiclePresence ? (
-                        <code className="text-[10px] md:text-xs font-black px-2 py-1 bg-white border border-gray-100 rounded-md text-indigo-600 whitespace-nowrap">
-                          {entry.vehicleNumber}
-                        </code>
-                      ) : (
-                        <span className="text-[8px] md:text-[10px] font-black text-gray-300 uppercase tracking-widest whitespace-nowrap">None</span>
-                      )}
-                    </td>
-                    <td className="px-4 md:px-8 py-4 md:py-6 whitespace-nowrap">
-                      <div className="text-[9px] md:text-[10px] font-black space-y-1">
-                        <p className="text-emerald-600"><span className="text-gray-400 mr-2">IN:</span> {new Date(entry.inTime).toLocaleTimeString()}</p>
-                        <p className="text-red-400">
-                          <span className="text-gray-400 mr-2">OUT:</span> 
-                          {entry.outTime ? new Date(entry.outTime).toLocaleTimeString() : 'PENDING EXIT'}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-4 md:px-8 py-4 md:py-6">
-                      <div className="flex items-center space-x-2">
-                        <span className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full animate-pulse ${
-                          entry.status === SecurityStatus.OUT ? 'bg-gray-300 animate-none' : 
-                          entry.status === SecurityStatus.OVERSTAY ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]'
-                        }`}></span>
-                        <span className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest ${
-                          entry.status === SecurityStatus.OUT ? 'text-gray-400' : 
-                          entry.status === SecurityStatus.OVERSTAY ? 'text-red-600' : 'text-indigo-600'
-                        }`}>
-                          {entry.status}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 md:px-8 py-4 md:py-6 text-right">
+                    <td className="px-6 py-4 text-right">
                       {entry.status !== SecurityStatus.OUT && (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMarkExit(entry.id);
-                          }}
-                          className="bg-white hover:bg-red-600 hover:text-white text-gray-400 px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl border border-gray-100 shadow-sm transition-all text-[8px] md:text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
-                        >
-                          Log Exit
+                        <button onClick={() => handleMarkExit(entry.id)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded text-xs font-semibold shadow-sm transition-all">
+                          Mark Exit
                         </button>
                       )}
                     </td>
                   </tr>
                 ))}
-                {filteredEntries.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-8 py-16 md:py-24 text-center">
-                      <div className="flex flex-col items-center opacity-20">
-                        <i className="fas fa-folder-open text-4xl md:text-6xl mb-4 text-gray-300"></i>
-                        <p className="text-sm md:text-xl font-black text-gray-400 uppercase tracking-widest">No Logs Found</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      {/* Initialize Entry Modal */}
+      {/* Entry Modal */}
       {isEntryModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 overflow-y-auto bg-slate-900/80 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl md:rounded-[40px] w-full max-w-2xl overflow-hidden shadow-2xl animate-scale-up my-auto">
-            <div className="bg-indigo-900 p-6 md:p-8 flex justify-between items-center text-white">
-              <div>
-                <h3 className="text-lg md:text-xl font-black uppercase tracking-tight">Security Protocol</h3>
-                <p className="text-[8px] md:text-[10px] font-bold text-indigo-300 uppercase tracking-widest mt-1">Registry Control</p>
-              </div>
-              <button onClick={() => setIsEntryModalOpen(false)} className="bg-white/10 p-2 rounded-full hover:bg-white/20">
-                <i className="fas fa-times"></i>
-              </button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-xl animate-scale-up border border-gray-200">
+            <div className="bg-indigo-700 px-8 py-4 flex justify-between items-center text-white">
+              <h3 className="text-lg font-bold">New Security Registry Entry</h3>
+              <button onClick={() => setIsEntryModalOpen(false)} className="hover:opacity-75"><i className="fas fa-times"></i></button>
             </div>
 
-            <form onSubmit={handleCreateEntry} className="p-6 md:p-10 space-y-6 md:space-y-8 overflow-y-auto max-h-[80vh] md:max-h-none">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Category</label>
-                  <div className="flex space-x-2">
-                    {Object.values(SecurityCategory).map(cat => (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, category: cat })}
-                        className={`flex-1 py-3 rounded-xl md:rounded-2xl font-black text-[10px] uppercase tracking-widest border transition-all ${
-                          formData.category === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-400 border-gray-100'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Type</label>
-                  <select 
-                    className={inputClasses}
-                    value={formData.subType}
-                    onChange={e => {
-                      const val = e.target.value as SecuritySubType;
-                      setFormData({ ...formData, subType: val, name: '', staffId: '', phoneNumber: '', vehicleNumber: '', reason: '' });
-                    }}
-                  >
-                    {Object.values(SecuritySubType).map(type => <option key={type} value={type}>{type}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Enhanced Photo Section */}
-              <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl md:rounded-3xl p-6 md:p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[240px]">
-                {formData.photoUrl ? (
-                  <div className="relative w-full h-40 md:h-48 group">
-                    <img src={formData.photoUrl} alt="Preview" className="w-full h-full object-cover rounded-xl shadow-lg" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-4">
-                       <button 
-                        type="button"
-                        onClick={() => {
-                          setIsCameraModalOpen(true);
-                          startCamera(facingMode);
-                        }}
-                        className="bg-white p-3 rounded-full text-indigo-600 hover:scale-110 transition-transform"
-                      >
-                        <i className="fas fa-redo"></i>
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, photoUrl: '' }))}
-                        className="bg-red-600 p-3 rounded-full text-white hover:scale-110 transition-transform"
-                      >
-                        <i className="fas fa-trash"></i>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="flex space-x-6">
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          setIsCameraModalOpen(true);
-                          startCamera(facingMode);
-                        }}
-                        className="flex flex-col items-center group"
-                      >
-                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                          <i className="fas fa-camera text-xl"></i>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Capture</span>
-                      </button>
-                      <div className="relative flex flex-col items-center group">
-                        <div className="bg-white p-4 rounded-full text-indigo-500 mb-2 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                          <i className="fas fa-upload text-xl"></i>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Upload</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          ref={fileInputRef} 
-                          onChange={handlePhotoUpload} 
-                          className="absolute inset-0 opacity-0 cursor-pointer" 
-                        />
-                      </div>
-                    </div>
-                    <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest text-center">Identity Documentation Required</p>
-                  </div>
-                )}
-                <canvas ref={canvasRef} className="hidden" />
-              </div>
-
-              {formData.subType === SecuritySubType.STAFF ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Personnel</label>
-                    <select 
-                      required
-                      className={inputClasses}
-                      value={formData.staffId}
-                      onChange={e => handleStaffSelect(e.target.value)}
-                    >
-                      <option value="">-- SELECT STAFF --</option>
-                      {users.filter(u => u.isActive).map(u => (
-                        <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.username})</option>
-                      ))}
+            <form onSubmit={handleCreateEntry} className="p-8 space-y-6">
+               <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className={labelClasses}>Category</label>
+                    <select className={inputClasses} value={formData.category} onChange={e => setFormData({...formData, category: e.target.value as SecurityCategory})}>
+                      <option value={SecurityCategory.PERSON}>Person</option>
+                      <option value={SecurityCategory.MATERIAL}>Material</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Phone Number (Auto-fill)</label>
-                    <input 
-                      required
-                      className={inputClasses}
-                      placeholder="CONTACT NUMBER"
-                      value={formData.phoneNumber}
-                      onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Name</label>
-                    <input 
-                      required
-                      className={inputClasses}
-                      placeholder="FULL NAME"
-                      value={formData.name}
-                      onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Phone Number</label>
-                    <input 
-                      required
-                      className={inputClasses}
-                      placeholder="CONTACT NUMBER"
-                      value={formData.phoneNumber}
-                      onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Purpose</label>
-                    <input 
-                      required
-                      className={inputClasses}
-                      placeholder="PURPOSE OF ENTRY"
-                      value={formData.reason}
-                      onChange={e => setFormData({ ...formData, reason: e.target.value })}
-                    />
-                  </div>
-                </div>
-              )}
+                 </div>
+                 <div>
+                    <label className={labelClasses}>Entry Type</label>
+                    <select className={inputClasses} value={formData.subType} onChange={e => setFormData({...formData, subType: e.target.value as SecuritySubType})}>
+                      {Object.values(SecuritySubType).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                 </div>
+               </div>
+               
+               <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 bg-gray-50 flex flex-col items-center">
+                  {formData.photoUrl ? (
+                    <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
+                      <img src={formData.photoUrl} className="w-full h-full object-contain cursor-zoom-in" alt="ID Capture" onClick={() => setPreviewImageUrl(formData.photoUrl)} />
+                      <button type="button" onClick={() => setFormData({...formData, photoUrl: ''})} className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full shadow-lg"><i className="fas fa-trash"></i></button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-4">
+                      <button type="button" onClick={() => setIsCameraModalOpen(true)} className="flex flex-col items-center gap-2 p-4 bg-white border border-gray-300 rounded-xl hover:bg-indigo-50 transition-all">
+                        <i className="fas fa-camera text-xl text-indigo-600"></i>
+                        <span className="text-[10px] font-bold uppercase">Camera</span>
+                      </button>
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 p-4 bg-white border border-gray-300 rounded-xl hover:bg-indigo-50 transition-all">
+                        <i className="fas fa-upload text-xl text-indigo-600"></i>
+                        <span className="text-[10px] font-bold uppercase">Upload</span>
+                      </button>
+                      <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleFileUpload} />
+                    </div>
+                  )}
+               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 items-end">
-                <div className="bg-gray-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] md:text-xs font-black text-gray-700">Vehicle Presence</p>
-                    <p className="text-[8px] md:text-[9px] text-gray-400 font-bold uppercase tracking-tight">Requirement</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={formData.vehiclePresence} onChange={e => setFormData({ ...formData, vehiclePresence: e.target.checked })} />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                  </label>
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 ml-1 ${formData.vehiclePresence ? 'text-gray-400' : 'text-gray-100'}`}>License ID</label>
-                  <input required={formData.vehiclePresence} disabled={!formData.vehiclePresence} className={`${inputClasses} ${!formData.vehiclePresence ? 'opacity-30' : ''}`} placeholder="E.G. ABC-123" value={formData.vehicleNumber} onChange={e => setFormData({ ...formData, vehicleNumber: e.target.value })} />
-                </div>
-              </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                    <label className={labelClasses}>Full Name</label>
+                    <input required className={inputClasses} placeholder="Enter name..." value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                 </div>
+                 <div>
+                    <label className={labelClasses}>Phone Number</label>
+                    <div className="flex gap-2">
+                      <select 
+                        className="w-24 px-2 py-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+                        value={countryCode}
+                        onChange={(e) => setCountryCode(e.target.value)}
+                      >
+                        {COUNTRY_CODES.map(c => (
+                          <option key={c.code} value={c.code}>{c.code} ({c.country})</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="tel"
+                        maxLength={10}
+                        inputMode="numeric"
+                        className={inputClasses} 
+                        placeholder="10 digit number" 
+                        value={formData.phoneNumber} 
+                        onChange={e => {
+                          const val = e.target.value.replace(/[^0-9]/g, '');
+                          if (val.length <= 10) {
+                            setFormData({ ...formData, phoneNumber: val });
+                          }
+                        }} 
+                      />
+                    </div>
+                 </div>
+               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                <div><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Arrival Time</label><input type="datetime-local" className={inputClasses} value={formData.inTime} onChange={e => setFormData({ ...formData, inTime: e.target.value })} /></div>
-                <div><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Target Departure</label><input type="datetime-local" className={inputClasses} value={formData.expectedOutTime} onChange={e => setFormData({ ...formData, expectedOutTime: e.target.value })} /></div>
-              </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="flex items-center gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <span className="text-xs font-semibold flex-grow">Is a vehicle present?</span>
+                    <input type="checkbox" checked={formData.vehiclePresence} onChange={e => setFormData({ ...formData, vehiclePresence: e.target.checked })} className="w-5 h-5 accent-indigo-600" />
+                 </div>
+                 <div>
+                    <label className={labelClasses}>Vehicle Number</label>
+                    <input 
+                      disabled={!formData.vehiclePresence} 
+                      className={inputClasses} 
+                      placeholder="e.g. MH 12 AB 1234" 
+                      value={formData.vehicleNumber} 
+                      onChange={e => setFormData({ ...formData, vehicleNumber: e.target.value.toUpperCase() })} 
+                    />
+                 </div>
+               </div>
 
-              <div className="flex flex-col md:flex-row justify-end space-y-3 md:space-y-0 md:space-x-4 pt-4 border-t border-gray-50">
-                <button type="button" onClick={() => setIsEntryModalOpen(false)} className="px-6 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-gray-900 transition-colors">Discard</button>
-                <button type="submit" className="bg-indigo-900 hover:bg-black text-white px-8 md:px-12 py-3 md:py-5 rounded-xl md:rounded-[24px] font-black text-[10px] uppercase tracking-widest shadow-2xl shadow-indigo-200 transition-all transform hover:-translate-y-1">Establish Log</button>
-              </div>
+               <div className="grid grid-cols-2 gap-4">
+                 <div><label className={labelClasses}>Entry Time</label><input type="datetime-local" className={inputClasses} value={formData.inTime} onChange={e => setFormData({ ...formData, inTime: e.target.value })} /></div>
+                 <div><label className={labelClasses}>Expected Exit</label><input type="datetime-local" className={inputClasses} value={formData.expectedOutTime} onChange={e => setFormData({ ...formData, expectedOutTime: e.target.value })} /></div>
+               </div>
+
+               <div className="flex justify-end gap-3 pt-4">
+                  <button type="button" onClick={() => setIsEntryModalOpen(false)} className="px-6 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
+                  <button type="submit" className="bg-indigo-600 text-white px-8 py-2 rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-all">Create Entry</button>
+               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Popup Camera Capture Modal - Optimized for Desktop/Tablet Visibility */}
+      {/* Camera Capture Modal */}
       {isCameraModalOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl animate-fade-in overflow-hidden">
-          <div className="relative w-full max-w-4xl bg-slate-900 rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.8)] border border-white/10 flex flex-col h-full max-h-[90vh] md:max-h-[85vh]">
-            
-            {/* Camera Overlay Controls (Top) */}
-            <div className="absolute top-0 left-0 right-0 p-4 md:p-8 flex justify-between items-center z-20 bg-gradient-to-b from-black/80 to-transparent">
-              <button 
-                onClick={() => setIsCameraModalOpen(false)}
-                className="w-10 h-10 md:w-14 md:h-14 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-600 transition-all border border-white/10 group"
-              >
-                <i className="fas fa-times text-sm md:text-lg group-hover:scale-110 transition-transform"></i>
-              </button>
-              
-              <div className="flex space-x-3 md:space-x-4">
-                {hasFlash && (
-                  <button 
-                    onClick={toggleFlash}
-                    className={`w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all border border-white/10 ${
-                      isFlashOn ? 'bg-yellow-400 text-black shadow-[0_0_30px_rgba(250,204,21,0.6)]' : 'bg-black/50 text-white hover:bg-white/20'
-                    }`}
-                    title="Toggle Flash"
-                  >
-                    <i className={`fas ${isFlashOn ? 'fa-bolt' : 'fa-bolt-slash'} text-sm md:text-lg`}></i>
-                  </button>
-                )}
-                {hasMultipleCameras && (
-                  <button 
-                    onClick={toggleFacingMode}
-                    className="w-10 h-10 md:w-14 md:h-14 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-indigo-600 transition-all border border-white/10 group"
-                    title="Flip Camera"
-                  >
-                    <i className="fas fa-camera-rotate text-sm md:text-lg group-hover:rotate-180 transition-transform duration-500"></i>
-                  </button>
-                )}
-              </div>
-            </div>
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className="relative w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+             <div className="flex-grow bg-black relative flex items-center justify-center min-h-[300px] md:min-h-[400px]">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  onLoadedMetadata={() => setIsCameraReady(true)}
+                  className={`max-h-[70vh] w-full object-contain ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} 
+                />
+                {!isCameraReady && <div className="absolute inset-0 flex items-center justify-center text-white/50 text-xs uppercase tracking-widest font-bold">Initializing Lens...</div>}
+                <div className="absolute inset-0 border-[30px] border-black/20 pointer-events-none"></div>
+             </div>
+             
+             <div className="p-8 flex items-center justify-center bg-white border-t border-gray-100">
+                <div className="flex items-center gap-10">
+                    <button 
+                      type="button"
+                      onClick={() => setIsCameraModalOpen(false)} 
+                      className="w-14 h-14 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center hover:bg-red-50 text-gray-600 transition-all"
+                    >
+                      <i className="fas fa-times text-xl"></i>
+                    </button>
+                    
+                    <button 
+                      type="button"
+                      onClick={capturePhoto} 
+                      className="w-20 h-20 rounded-full bg-indigo-600 text-white flex items-center justify-center border-4 border-white shadow-[0_10px_40px_rgba(79,70,229,0.3)] active:scale-90 transition-all"
+                    >
+                      <i className="fas fa-camera text-2xl"></i>
+                    </button>
 
-            {/* Video Feed Container */}
-            <div className="flex-grow relative bg-black flex items-center justify-center overflow-hidden min-h-0">
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                muted
-                onLoadedMetadata={() => videoRef.current?.play()}
-                className={`w-full h-full object-contain md:object-cover transition-transform duration-500 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
-              />
-              
-              {/* Corner Accents - Responsive Sizing */}
-              <div className="absolute inset-4 md:inset-10 pointer-events-none">
-                <div className="absolute top-0 left-0 w-8 h-8 md:w-14 md:h-14 border-t-4 border-l-4 border-white/30 rounded-tl-2xl"></div>
-                <div className="absolute top-0 right-0 w-8 h-8 md:w-14 md:h-14 border-t-4 border-r-4 border-white/30 rounded-tr-2xl"></div>
-                <div className="absolute bottom-0 left-0 w-8 h-8 md:w-14 md:h-14 border-b-4 border-l-4 border-white/30 rounded-bl-2xl"></div>
-                <div className="absolute bottom-0 right-0 w-8 h-8 md:w-14 md:h-14 border-b-4 border-r-4 border-white/30 rounded-br-2xl"></div>
-              </div>
-
-              {/* Center Focus Reticle */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-48 h-48 md:w-80 md:h-80 border-2 border-white/10 rounded-[40px] flex items-center justify-center">
-                  <div className="w-1 h-1 bg-white/20 rounded-full"></div>
+                    <button 
+                      type="button"
+                      onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')} 
+                      className="w-14 h-14 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center text-gray-600 transition-all"
+                    >
+                      <i className="fas fa-sync text-xl"></i>
+                    </button>
+                    
+                    {hasFlash && (
+                      <button 
+                        type="button"
+                        onClick={toggleFlash} 
+                        className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isFlashOn ? 'bg-yellow-400 border-yellow-500 text-white' : 'bg-gray-50 border border-gray-200 text-gray-400'}`}
+                      >
+                        <i className="fas fa-bolt text-xl"></i>
+                      </button>
+                    )}
                 </div>
-              </div>
-            </div>
-
-            {/* Bottom Capture Section - High Visibility for All Screens */}
-            <div className="bg-slate-900 px-6 py-8 md:py-12 flex flex-col items-center border-t border-white/5 shrink-0 z-20">
-              <div className="flex flex-col items-center space-y-4">
-                <button 
-                  onClick={capturePhoto}
-                  className="group relative w-16 h-16 md:w-24 md:h-24 flex items-center justify-center transition-transform active:scale-90"
-                >
-                  <div className="absolute inset-0 rounded-full border-4 border-white/20 group-hover:border-indigo-500/60 group-hover:scale-110 transition-all duration-300"></div>
-                  <div className="w-12 h-12 md:w-20 md:h-20 rounded-full bg-white group-hover:scale-105 transition-all shadow-[0_0_40px_rgba(255,255,255,0.4)] relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-gray-200 to-white opacity-50"></div>
-                  </div>
-                  {/* Subtle Radar Ripple */}
-                  <div className="absolute inset-0 rounded-full bg-white/10 animate-ping opacity-20 pointer-events-none"></div>
-                </button>
-                <div className="flex flex-col items-center space-y-1">
-                  <p className="text-[10px] md:text-xs font-black text-white uppercase tracking-[0.3em] opacity-80">Capture Identity</p>
-                  <p className="text-[8px] md:text-[9px] font-bold text-indigo-400 uppercase tracking-widest opacity-60">Verification Protocol Active</p>
-                </div>
-              </div>
-            </div>
-
+             </div>
           </div>
         </div>
       )}
 
-      {/* Entry Details Viewer Modal */}
-      {selectedEntry && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-3xl md:rounded-[40px] w-full max-w-4xl overflow-hidden shadow-2xl animate-scale-up my-auto">
-            <div className="bg-indigo-900 p-6 md:p-8 flex justify-between items-start text-white relative">
-              <div className="flex space-x-4 md:space-x-6">
-                {selectedEntry.photoUrl ? (
-                  <img src={selectedEntry.photoUrl} className="w-20 h-20 md:w-32 md:h-32 rounded-2xl md:rounded-3xl object-cover border-4 border-white/10 shadow-lg cursor-zoom-in hover:scale-105 transition-transform" alt="" onClick={() => setFullSizePhotoUrl(selectedEntry.photoUrl!)} />
-                ) : (
-                  <div className="w-20 h-20 md:w-32 md:h-32 rounded-2xl md:rounded-3xl bg-white/10 flex items-center justify-center text-4xl border-4 border-white/10"><i className={`fas ${selectedEntry.category === SecurityCategory.PERSON ? 'fa-user' : 'fa-box-open'}`}></i></div>
-                )}
-                <div className="flex flex-col justify-center">
-                  <div className="flex items-center space-x-3 mb-2">
-                    <span className="bg-indigo-600 px-3 py-1 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest">{selectedEntry.subType}</span>
-                    <span className={`px-3 py-1 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest ${selectedEntry.status === SecurityStatus.OUT ? 'bg-gray-600' : selectedEntry.status === SecurityStatus.OVERSTAY ? 'bg-red-600' : 'bg-emerald-600'}`}>{selectedEntry.status}</span>
-                  </div>
-                  <h3 className="text-xl md:text-3xl font-black tracking-tight">{selectedEntry.name}</h3>
-                  <p className="text-indigo-300 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Registry Log: #{selectedEntry.id.toUpperCase()}</p>
-                </div>
-              </div>
-              <button onClick={() => setSelectedEntry(null)} className="bg-white/10 p-2 rounded-full hover:bg-white/20 transition-colors"><i className="fas fa-times"></i></button>
-            </div>
-
-            <div className="p-6 md:p-10 grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10 max-h-[60vh] md:max-h-none overflow-y-auto">
-              <div className="space-y-6 md:col-span-2">
-                <div>
-                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Telemetry Details</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Arrival Time</p><p className="text-xs md:text-sm font-black text-gray-900">{new Date(selectedEntry.inTime).toLocaleString()}</p></div>
-                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Target Departure</p><p className="text-xs md:text-sm font-black text-gray-900">{selectedEntry.expectedOutTime ? new Date(selectedEntry.expectedOutTime).toLocaleString() : 'N/A'}</p></div>
-                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Exit Time</p><p className="text-xs md:text-sm font-black text-red-600">{selectedEntry.outTime ? new Date(selectedEntry.outTime).toLocaleString() : 'PENDING EXIT'}</p></div>
-                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Vehicle License</p><p className="text-xs md:text-sm font-black text-indigo-600">{selectedEntry.vehiclePresence ? selectedEntry.vehicleNumber : 'NO VEHICLE'}</p></div>
-                    <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 col-span-2"><p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">Verified Contact</p><p className="text-xs md:text-sm font-black text-gray-900">{selectedEntry.phoneNumber || 'NOT PROVIDED'}</p></div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Contextual Data</h4>
-                  <div className="space-y-4">
-                    <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100"><p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mb-2">Purpose for Factory Access</p><p className="text-sm font-medium text-indigo-900 leading-relaxed">{selectedEntry.reason || 'No specific purpose documented.'}</p></div>
-                    {selectedEntry.remarks && <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100"><p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-2">Internal Remarks</p><p className="text-sm font-medium text-gray-600 leading-relaxed">{selectedEntry.remarks}</p></div>}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Administrative Trail</h4>
-                  <div className="bg-gray-900 p-6 rounded-3xl text-white space-y-4 shadow-xl">
-                    <div><p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mb-1">Logged By</p><p className="text-xs font-black">{selectedEntry.createdByName}</p><p className="text-[8px] font-bold text-gray-500 uppercase mt-0.5">Terminal ID: {selectedEntry.createdBy}</p></div>
-                    <div className="pt-4 border-t border-white/10"><p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mb-1">Encryption Hash</p><code className="text-[8px] block truncate text-gray-500">{selectedEntry.id}-AES256-PROTO</code></div>
-                  </div>
-                </div>
-                {selectedEntry.status !== SecurityStatus.OUT && <button onClick={() => handleMarkExit(selectedEntry.id)} className="w-full bg-red-600 hover:bg-black text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center space-x-3"><i className="fas fa-sign-out-alt"></i><span>Execute Gate Release</span></button>}
-              </div>
-            </div>
-          </div>
+      {/* Image Preview */}
+      {previewImageUrl && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-sm cursor-zoom-out" onClick={() => setPreviewImageUrl(null)}>
+            <img src={previewImageUrl} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" alt="Preview Fullscreen" />
+            <button className="absolute top-6 right-6 text-white text-3xl"><i className="fas fa-times"></i></button>
         </div>
       )}
 
-      {/* Lightbox */}
-      {fullSizePhotoUrl && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/95 backdrop-blur-md animate-fade-in" onClick={() => setFullSizePhotoUrl(null)}>
-          <button className="absolute top-6 right-6 text-white bg-white/10 hover:bg-white/20 p-4 rounded-full transition-all" onClick={() => setFullSizePhotoUrl(null)}><i className="fas fa-times text-2xl"></i></button>
-          <img src={fullSizePhotoUrl} className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl object-contain animate-scale-up" alt="" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
+      <canvas ref={canvasRef} className="hidden" />
 
       <style>{`
-        @keyframes scale-up { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scale-up { from { transform: scale(0.98); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .animate-scale-up { animation: scale-up 0.2s ease-out; }
-        .animate-fade-in { animation: fade-in 0.2s ease-out; }
+        
+        input[type="datetime-local"] {
+          position: relative;
+        }
+        
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+          background: transparent;
+          bottom: 0;
+          color: transparent;
+          cursor: pointer;
+          height: auto;
+          left: 0;
+          position: absolute;
+          right: 0;
+          top: 0;
+          width: auto;
+        }
       `}</style>
     </Layout>
   );

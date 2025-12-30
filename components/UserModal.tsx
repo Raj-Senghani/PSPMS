@@ -155,7 +155,17 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Phone Number</label>
-                    <input className={inputClasses} value={formData.phoneNumber} onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })} placeholder="+91 00000 00000" />
+                    <input 
+                      type="text"
+                      inputMode="numeric"
+                      className={inputClasses} 
+                      value={formData.phoneNumber} 
+                      onChange={e => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        setFormData({ ...formData, phoneNumber: val });
+                      }} 
+                      placeholder="0000000000" 
+                    />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Vehicle Number</label>
