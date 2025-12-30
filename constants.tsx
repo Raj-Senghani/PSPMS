@@ -12,7 +12,9 @@ export const INITIAL_USERS: User[] = [
     roles: ['Administrator'],
     assignedDashboards: [DashboardType.MASTER],
     isActive: true,
-    createdAt: new Date().toISOString()
+    isRevocable: false,
+    createdAt: new Date().toISOString(),
+    isMasterAdmin: true
   },
   {
     id: '2',
@@ -24,6 +26,7 @@ export const INITIAL_USERS: User[] = [
     roles: ['Sales Head'],
     assignedDashboards: [DashboardType.SALES_TEAM],
     isActive: true,
+    isRevocable: true,
     createdAt: new Date().toISOString()
   },
   {
@@ -36,6 +39,7 @@ export const INITIAL_USERS: User[] = [
     roles: ['Security Head'],
     assignedDashboards: [DashboardType.SECURITY],
     isActive: true,
+    isRevocable: true,
     createdAt: new Date().toISOString()
   }
 ];

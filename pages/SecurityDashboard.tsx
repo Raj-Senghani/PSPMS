@@ -38,7 +38,7 @@ const getFutureTime = (hours: number) => {
 export const SecurityDashboard: React.FC = () => {
   const { authState, users } = useAuth();
   const [entries, setEntries] = useState<SecurityEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState<SecurityCategory | 'All'>('All');
@@ -65,7 +65,7 @@ export const SecurityDashboard: React.FC = () => {
     subType: SecuritySubType.VISITOR,
     name: '',
     staffId: '',
-    phoneNumber: '', // This will hold the 10 digits
+    phoneNumber: '', 
     vehiclePresence: false,
     vehicleNumber: '',
     reason: '',
@@ -77,11 +77,15 @@ export const SecurityDashboard: React.FC = () => {
 
   useEffect(() => {
     const saved = localStorage.getItem('pspms_security_logs');
-    if (saved) setEntries(JSON.parse(saved));
-    setTimeout(() => setIsLoading(false), 300);
+    if (saved) {
+      try {
+        setEntries(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse security logs", e);
+      }
+    }
   }, []);
 
-  // Camera management effect
   useEffect(() => {
     if (isCameraModalOpen) {
       startCamera(facingMode);
@@ -91,7 +95,6 @@ export const SecurityDashboard: React.FC = () => {
     return () => stopCamera();
   }, [isCameraModalOpen, facingMode]);
 
-  // Professional Staff Auto-fill Logic
   useEffect(() => {
     if (formData.subType === SecuritySubType.STAFF && formData.name.length > 2) {
       const searchName = formData.name.toLowerCase();
@@ -100,7 +103,6 @@ export const SecurityDashboard: React.FC = () => {
       );
 
       if (matchedUser) {
-        // Strip country code if present for display in our 10-digit box
         let strippedPhone = matchedUser.phoneNumber || '';
         const foundCode = COUNTRY_CODES.find(c => strippedPhone.startsWith(c.code));
         if (foundCode) {
@@ -116,34 +118,8 @@ export const SecurityDashboard: React.FC = () => {
         }));
         return;
       }
-
-      const historicalMatch = entries.find(e => 
-        e.name.toLowerCase().includes(searchName) && 
-        e.subType === SecuritySubType.STAFF
-      );
-
-      if (historicalMatch) {
-        let strippedPhone = historicalMatch.phoneNumber || '';
-        const foundCode = COUNTRY_CODES.find(c => strippedPhone.startsWith(c.code));
-        if (foundCode) {
-          setCountryCode(foundCode.code);
-          strippedPhone = strippedPhone.replace(foundCode.code, '').trim();
-        }
-
-        setFormData(prev => ({
-          ...prev,
-          phoneNumber: strippedPhone.slice(0, 10),
-          vehicleNumber: historicalMatch.vehicleNumber || prev.vehicleNumber,
-          vehiclePresence: historicalMatch.vehiclePresence || prev.vehiclePresence
-        }));
-      }
     }
-  }, [formData.name, formData.subType, users, entries]);
-
-  const syncLogs = (updatedEntries: SecurityEntry[]) => {
-    setEntries(updatedEntries);
-    localStorage.setItem('pspms_security_logs', JSON.stringify(updatedEntries));
-  };
+  }, [formData.name, formData.subType, users]);
 
   const startCamera = async (mode: 'user' | 'environment') => {
     setIsCameraReady(false);
@@ -262,34 +238,44 @@ export const SecurityDashboard: React.FC = () => {
       return;
     }
 
-    setIsLoading(true);
-    const newEntry: SecurityEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      ...formData,
-      phoneNumber: `${countryCode} ${formData.phoneNumber}`,
-      inTime: new Date(formData.inTime).toISOString(),
-      status: SecurityStatus.IN,
-      createdBy: authState.user?.id || 'sys',
-      createdByName: `${authState.user?.firstName} ${authState.user?.lastName}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    setIsSubmitting(true);
+    
     setTimeout(() => {
-      syncLogs([newEntry, ...entries]);
-      setIsLoading(false);
+      const newEntry: SecurityEntry = {
+        id: Math.random().toString(36).substr(2, 9),
+        ...formData,
+        phoneNumber: `${countryCode} ${formData.phoneNumber}`,
+        inTime: new Date(formData.inTime).toISOString(),
+        status: SecurityStatus.IN,
+        createdBy: authState.user?.id || 'sys',
+        createdByName: `${authState.user?.firstName} ${authState.user?.lastName}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setEntries(prev => {
+        const updated = [newEntry, ...prev];
+        localStorage.setItem('pspms_security_logs', JSON.stringify(updated));
+        return updated;
+      });
+
+      setIsSubmitting(false);
       setIsEntryModalOpen(false);
       resetForm();
-    }, 400);
+    }, 150);
   };
 
   const handleMarkExit = (id: string) => {
-    const updated = entries.map(e => e.id === id ? { 
-      ...e, 
-      status: SecurityStatus.OUT, 
-      outTime: new Date().toISOString(),
-      updatedAt: new Date().toISOString() 
-    } : e);
-    syncLogs(updated);
+    setEntries(prev => {
+      const updated = prev.map(e => e.id === id ? { 
+        ...e, 
+        status: SecurityStatus.OUT, 
+        outTime: new Date().toISOString(),
+        updatedAt: new Date().toISOString() 
+      } : e);
+      localStorage.setItem('pspms_security_logs', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const resetForm = () => {
@@ -333,12 +319,12 @@ export const SecurityDashboard: React.FC = () => {
 
         {/* Filter Bar */}
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div className="flex bg-gray-100 p-1 rounded-lg">
+            <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto no-scrollbar">
               {(['today', 'active', 'pending'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-semibold capitalize transition-all ${
+                  className={`flex-1 md:flex-none px-4 py-1.5 rounded-md text-xs font-semibold capitalize transition-all whitespace-nowrap ${
                     activeTab === tab ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
@@ -351,7 +337,7 @@ export const SecurityDashboard: React.FC = () => {
                 <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
                 <input 
                   type="text" 
-                  placeholder="Search name or vehicle..." 
+                  placeholder="Search..." 
                   className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -366,8 +352,8 @@ export const SecurityDashboard: React.FC = () => {
             </div>
         </div>
 
-        {/* Table View */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {/* Desktop Table View (lg screens and up) */}
+        <div className="hidden lg:block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
               <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
@@ -437,9 +423,63 @@ export const SecurityDashboard: React.FC = () => {
             </table>
           </div>
         </div>
+
+        {/* Mobile & Tablet Card Layout (lg:hidden) */}
+        <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {filteredEntries.map(entry => (
+            <div key={entry.id} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm flex flex-col gap-4">
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-12 h-12 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden"
+                    onClick={() => entry.photoUrl && setPreviewImageUrl(entry.photoUrl)}
+                  >
+                    {entry.photoUrl ? (
+                      <img src={entry.photoUrl} className="w-full h-full object-cover" alt="" />
+                    ) : (
+                      <i className="fas fa-user text-gray-300"></i>
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-900">{entry.name}</h4>
+                    <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">{entry.subType}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-y-4 pt-4 border-t border-gray-50">
+                <div>
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
+                  <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-lg border ${
+                    entry.status === SecurityStatus.OUT 
+                      ? 'bg-gray-50 text-gray-400 border-gray-200' 
+                      : entry.status === SecurityStatus.OVERSTAY 
+                      ? 'bg-red-50 text-red-600 border-red-200'
+                      : 'bg-green-50 text-green-700 border-green-200'
+                  }`}>
+                    {entry.status}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Vehicle</p>
+                  <p className="text-[11px] font-mono font-bold text-gray-700">{entry.vehiclePresence ? entry.vehicleNumber : 'N/A'}</p>
+                </div>
+              </div>
+
+              {entry.status !== SecurityStatus.OUT && (
+                <button 
+                  onClick={() => handleMarkExit(entry.id)}
+                  className="w-full bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-600 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                >
+                  Confirm Exit
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Entry Modal */}
+      {/* Entry Modal and Camera Modals remain the same ... */}
       {isEntryModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-xl animate-scale-up border border-gray-200">
@@ -545,7 +585,17 @@ export const SecurityDashboard: React.FC = () => {
 
                <div className="flex justify-end gap-3 pt-4">
                   <button type="button" onClick={() => setIsEntryModalOpen(false)} className="px-6 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
-                  <button type="submit" className="bg-indigo-600 text-white px-8 py-2 rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-all">Create Entry</button>
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting}
+                    className="bg-indigo-600 text-white px-8 py-2 rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 min-w-[140px]"
+                  >
+                    {isSubmitting ? (
+                      <><i className="fas fa-spinner fa-spin"></i> Processing...</>
+                    ) : (
+                      'Create Entry'
+                    )}
+                  </button>
                </div>
             </form>
           </div>

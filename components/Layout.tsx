@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { DASHBOARD_ROUTES } from '../constants';
@@ -11,9 +11,22 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
-  const { authState, logout, users } = useAuth();
+  const { authState, logout, users, requests } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [showPhoneNotification, setShowPhoneNotification] = useState(false);
+
+  useEffect(() => {
+    // If admin is logged in and there's a new pending request, show phone notification
+    if (authState.user?.isMasterAdmin) {
+      const pendingCount = requests.filter(r => r.status === 'PENDING').length;
+      if (pendingCount > 0) {
+        setShowPhoneNotification(true);
+        const timer = setTimeout(() => setShowPhoneNotification(false), 5000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [requests.length, authState.user?.isMasterAdmin]);
 
   const handleLogout = () => {
     logout();
@@ -39,6 +52,18 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
+      {/* Mobile-Style Admin Notification (Simulated Phone Alert) */}
+      {showPhoneNotification && authState.user?.isMasterAdmin && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-sm bg-black/90 text-white p-4 rounded-3xl shadow-2xl border border-white/10 flex items-center gap-4 animate-slide-down backdrop-blur-lg">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center"><i className="fas fa-shield-alt"></i></div>
+          <div className="flex-grow">
+            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Master Security Alert</p>
+            <p className="text-xs font-bold leading-tight">Secondary user is requesting critical clearance. Action required in Master Dashboard.</p>
+          </div>
+          <button onClick={() => navigate('/master')} className="px-3 py-1 bg-white text-black text-[9px] font-black uppercase rounded-lg">Open</button>
+        </div>
+      )}
+
       {/* Professional Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
@@ -74,7 +99,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-semibold text-gray-900">{user.firstName} {user.lastName}</p>
-              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{user.roles[0]}</p>
+              <div className="flex items-center justify-end gap-1">
+                {user.isMasterAdmin && <i className="fas fa-crown text-[8px] text-orange-500"></i>}
+                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{user.roles[0]}</p>
+              </div>
             </div>
             <button 
               onClick={handleLogout}
@@ -123,6 +151,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
           </div>
         </div>
       </footer>
+      <style>{`
+        @keyframes slide-down { from { transform: translate(-50%, -100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+        .animate-slide-down { animation: slide-down 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+      `}</style>
     </div>
   );
 };

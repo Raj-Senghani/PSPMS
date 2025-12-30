@@ -38,7 +38,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
     vehicleNumber: '',
     roles: [] as string[],
     assignedDashboards: [] as string[],
-    isActive: true
+    isActive: true,
+    isRevocable: true
   });
   const [showPassword, setShowPassword] = useState(false);
 
@@ -56,7 +57,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
         vehicleNumber: editingUser.vehicleNumber || '',
         roles: editingUser.roles,
         assignedDashboards: editingUser.assignedDashboards,
-        isActive: editingUser.isActive
+        isActive: editingUser.isActive,
+        isRevocable: editingUser.isRevocable ?? true
       });
     } else {
       setFormData({
@@ -68,7 +70,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
         vehicleNumber: '',
         roles: [],
         assignedDashboards: [DashboardType.SALES_TEAM],
-        isActive: true
+        isActive: true,
+        isRevocable: true
       });
     }
   }, [editingUser, isOpen]);
@@ -111,6 +114,14 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
     }
   };
 
+  const handleToggleRevocable = (checked: boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      isRevocable: checked,
+      isActive: !checked ? true : prev.isActive
+    }));
+  };
+
   const inputClasses = "w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none placeholder-gray-400 text-sm font-medium";
 
   return (
@@ -149,27 +160,30 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Login Username (Terminal ID)</label>
+                  <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Login Username</label>
                   <input required className={inputClasses} value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} placeholder="j.doe01" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Phone Number</label>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Phone (10 Digits)</label>
                     <input 
                       type="text"
+                      maxLength={10}
                       inputMode="numeric"
                       className={inputClasses} 
                       value={formData.phoneNumber} 
                       onChange={e => {
                         const val = e.target.value.replace(/[^0-9]/g, '');
-                        setFormData({ ...formData, phoneNumber: val });
+                        if (val.length <= 10) {
+                          setFormData({ ...formData, phoneNumber: val });
+                        }
                       }} 
-                      placeholder="0000000000" 
+                      placeholder="9876543210" 
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase">Vehicle Number</label>
-                    <input className={inputClasses} value={formData.vehicleNumber} onChange={e => setFormData({ ...formData, vehicleNumber: e.target.value })} placeholder="ABC-1234" />
+                    <input className={inputClasses} value={formData.vehicleNumber} onChange={e => setFormData({ ...formData, vehicleNumber: e.target.value.toUpperCase() })} placeholder="ABC-1234" />
                   </div>
                 </div>
                 <div className="relative">
@@ -186,14 +200,30 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                     <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
                   </button>
                 </div>
-                <div className="pt-4">
+                <div className="pt-4 space-y-3">
                   <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black text-gray-700">Revocability Protocol</p>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Can identity be deactivated?</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" checked={formData.isRevocable} onChange={e => handleToggleRevocable(e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                    </label>
+                  </div>
+                  <div className={`bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between transition-opacity ${!formData.isRevocable ? 'opacity-50' : 'opacity-100'}`}>
                     <div>
                       <p className="text-xs font-black text-gray-700">System Authorization</p>
                       <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Enable or Disable User Access</p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" checked={formData.isActive} onChange={e => setFormData({ ...formData, isActive: e.target.checked })} />
+                    <label className={`relative inline-flex items-center ${!formData.isRevocable ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                      <input 
+                        type="checkbox" 
+                        className="sr-only peer" 
+                        checked={formData.isActive} 
+                        disabled={!formData.isRevocable}
+                        onChange={e => setFormData({ ...formData, isActive: e.target.checked })} 
+                      />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                   </div>
@@ -204,26 +234,10 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center space-x-2 text-indigo-900">
                     <i className="fas fa-user-tag"></i>
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Designated Roles</h4>
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Roles</h4>
                   </div>
                 </div>
-                <div className="flex space-x-2">
-                  <input 
-                    type="text" 
-                    className={`${inputClasses} py-2 text-xs`} 
-                    placeholder="New Role Name..."
-                    value={newRoleName}
-                    onChange={(e) => setNewRoleName(e.target.value)}
-                  />
-                  <button 
-                    type="button" 
-                    onClick={addNewRole}
-                    className="bg-indigo-600 text-white px-4 rounded-xl hover:bg-black transition-colors text-xs font-bold"
-                  >
-                    ADD
-                  </button>
-                </div>
-                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 max-h-[220px] overflow-y-auto grid grid-cols-1 gap-2">
+                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 max-h-[300px] overflow-y-auto grid grid-cols-1 gap-2">
                   {availableRoles.map(role => (
                     <label key={role} className={`flex items-center space-x-3 p-3 rounded-xl border transition-all cursor-pointer ${
                       formData.roles.includes(role) 
@@ -244,27 +258,9 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
             </div>
 
             <div className="space-y-5">
-               <div className="flex items-center justify-between mb-2">
-                 <div className="flex items-center space-x-2 text-indigo-900">
+               <div className="flex items-center space-x-2 text-indigo-900">
                     <i className="fas fa-layer-group"></i>
                     <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">Dashboard Access Matrix</h4>
-                 </div>
-                 <div className="flex space-x-2 max-w-xs">
-                    <input 
-                      type="text" 
-                      className={`${inputClasses} py-2 text-xs`} 
-                      placeholder="New Segment Name..."
-                      value={newDashName}
-                      onChange={(e) => setNewDashName(e.target.value)}
-                    />
-                    <button 
-                      type="button" 
-                      onClick={addNewDashboard}
-                      className="bg-indigo-600 text-white px-4 rounded-xl hover:bg-black transition-colors text-xs font-bold"
-                    >
-                      ADD
-                    </button>
-                  </div>
                </div>
                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[200px] overflow-y-auto p-1">
                  {availableDashboards.map(dash => (
@@ -291,7 +287,7 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, e
             </div>
 
             <div className="pt-6 border-t border-gray-100 flex justify-end space-x-4">
-              <button type="button" onClick={onClose} className="px-8 py-3 text-gray-500 font-black uppercase tracking-widest text-[10px] hover:text-gray-900 transition-colors">Cancel Protocol</button>
+              <button type="button" onClick={onClose} className="px-8 py-3 text-gray-500 font-black uppercase tracking-widest text-[10px] hover:text-gray-900 transition-colors">Cancel</button>
               <button type="submit" className="px-10 py-4 bg-indigo-900 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl shadow-indigo-200 hover:bg-black transform hover:-translate-y-1 transition-all">
                 {editingUser ? 'Save Personnel Data' : 'Authorize Credentials'}
               </button>

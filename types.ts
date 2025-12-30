@@ -16,17 +16,38 @@ export interface User {
   lastName: string;
   username: string;
   password?: string;
-  phoneNumber?: string; // Contact tracking
+  phoneNumber?: string;
   roles: string[];
   assignedDashboards: string[];
   isActive: boolean;
+  isRevocable: boolean;
   createdAt: string;
   vehicleNumber?: string;
+  // Security enhancements
+  isMasterAdmin?: boolean; // The primary/original admin
+  isMasterLocked?: boolean; // If secondary master access is revoked
 }
 
 export interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
+}
+
+export enum RequestType {
+  DELETE_MEMBER = 'DELETE_MEMBER',
+  EDIT_ADMIN = 'EDIT_ADMIN',
+  MASTER_ACCESS = 'MASTER_ACCESS'
+}
+
+export interface AdminRequest {
+  id: string;
+  fromUserId: string;
+  fromUserName: string;
+  type: RequestType;
+  targetId?: string;
+  targetName?: string;
+  timestamp: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 export enum SecurityCategory {
@@ -56,7 +77,7 @@ export interface SecurityEntry {
   subType: SecuritySubType;
   name: string;
   staffId?: string;
-  phoneNumber?: string; // Contact tracking for entries
+  phoneNumber?: string;
   vehiclePresence: boolean;
   vehicleNumber?: string;
   reason?: string;
